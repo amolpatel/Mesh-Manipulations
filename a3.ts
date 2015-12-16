@@ -18,6 +18,7 @@ import loader = require('./loader');
 //import textureUtils = require('./textureUtils');
 import f3d = require('./f3d');
 
+
 ////////////////////////////////////////////////////////////////////////////////////////////
 // stats module by mrdoob (https://github.com/mrdoob/stats.js) to show the performance 
 // of your graphics
@@ -71,6 +72,7 @@ var onLoad = function (mesh: loader.Mesh) {
   progressGuage.style.visibility = "hidden";
 	console.log("got a mesh: " + mesh);
   
+  
   // the vertex array and the triangle array are different lengths.
   // we need to create new arrays that are not nested
   // - position: 3 entries per vertex (x, y, z)
@@ -84,22 +86,135 @@ var onLoad = function (mesh: loader.Mesh) {
   var color = [];
   var normal = [];
   var indices = [];
+  
+  // position is coordinates of vertices in 1D array
+  var populatePosition = function() {
+    for(var i = 0; i < numVerts; i++){
+      position.push(mesh.v[i][0], mesh.v[i][1], mesh.v[i][2]);
+    }
+  }
+  populatePosition();
+  
+  var populateColor = function() {
+    for (var i = 0; i < mesh.v.length; i++){
+      var tempColor = chroma.hsv(rand(360), 0.5, 1);
+      color.push(tempColor.rgb()[0], tempColor.rgb()[1], tempColor.rgb()[2], 255);
+    } 
+  }
+  populateColor();
+  
+  // indices is index of triangle vertices in 1D array every 3rd
+  var populateIndices = function() {
+    for(var i = 0; i < numTris; i++){
+        indices.push(mesh.t[i][0], mesh.t[i][1], mesh.t[i][2]); 
+      }
+  }
+  populateIndices();
+  
+  
+  // for each triangle i, get the normal by getting the coordinates and doing ab x bc
+  // i is triangle number
+  // function from slides
+  var triangleNormal = function(i) {
+    var vect_a = vec3.fromValues(position[indices[i]*3], position[indices[i]*3+1], position[indices[i]*3+2]);
+    console.dir(vect_a);
+    var vect_b = vec3.fromValues(position[indices[i+1]*3], position[indices[i+1]*3+1], position[indices[i+1]*3+2]);
+    console.dir(vect_b);
+    var vect_c = vec3.fromValues(position[indices[i+2]*3], position[indices[i+2]*3+1], position[indices[i+2]*3+2]);
+    console.dir(vect_c);
     
-  //////////////
-  ///////// YOUR CODE HERE TO TAKE THE MESH OBJECT AND CREATE ALL THE INFORMATION NEEDED TO RENDER
-  //////////////
+    var vect_ab = vec3.create();
+    vec3.subtract(vect_ab, vect_a, vect_b);
+    
+    var vect_bc = vec3.create();
+    vec3.subtract(vect_bc, vect_b, vect_c)
+    
+    var norm_ab_ac = vec3.create();
+    vec3.cross(norm_ab_ac, vect_ab, vect_bc);
+    
+    return norm_ab_ac;
+  }
+  
+  var normal_tri_arr = [];
+  // for each triangle, get the norm
+  var computeTriNormals = function() {
+    var count = 0;
+    for(var i = 0; i < indices.length; i=i+3){
+        normal_tri_arr[count] = triangleNormal(i);
+        count++;
+    }
+  }
+  computeTriNormals();
+  
+  // function from slides
+  var computeVertexNormals = function() {
+    for(var i = 0; i < numVerts; i++){
+      normal[i] = vec3.create();
+    }  
+    
+    for(var i = 0; i < normal_tri_arr.length; i++){
+      vec3.add(normal[indices[i*3]], normal[indices[i*3]], normal_tri_arr[i]);
+      vec3.add(normal[indices[i*3+1]], normal[indices[i*3+1]], normal_tri_arr[i]);
+      vec3.add(normal[indices[i*3+2]], normal[indices[i*3+2]], normal_tri_arr[i]);
+    }
+    
+    for(var i = 0; i < normal.length; i++){
+      vec3.normalize(normal[i],normal[i]);
+    }
+    
+    var tempArr = [];
+    for(var i = 0; i < normal.length; i++){
+      tempArr.push(normal[i][0],normal[i][1],normal[i][2]);
+    }
+    normal = [];
+    normal = tempArr;
+    
+  }
+  computeVertexNormals();
+
   
   // bb1 and bb2 are the corners of the bounding box of the object.  
   var bb1 = vec3.create();
   var bb2 = vec3.create();
   
+   var find_bb1 = function() {
+    var min_x = 0, min_y = 0, min_z = 0;
+    for(var i = 0; i < numVerts; i++){
+      min_x = Math.min(mesh.v[i][0], min_x);
+      min_y = Math.min(mesh.v[i][1], min_y);
+      min_z = Math.min(mesh.v[i][2], min_z);
+    }
+    bb1 = vec3.fromValues(min_x, min_y, min_z);
+  }
+  find_bb1();
+  
+  var find_bb2 = function() {
+    var max_x = 0, max_y = 0, max_z = 0;
+    for(var i = 0; i < numVerts; i++){
+      max_x = Math.max(mesh.v[i][0], max_x);
+      max_y = Math.max(mesh.v[i][1], max_y);
+      max_z = Math.max(mesh.v[i][2], max_z);
+    }
+    bb2 = vec3.fromValues(max_x, max_y, max_z);
+  }
+  find_bb2();
+  
+  var center_bb1_bb2 = vec3.create();
+  vec3.add(center_bb1_bb2, bb2, bb1);
+  vec3.scale(center_bb1_bb2, center_bb1_bb2, .5);
+  
   // Setup the new object.  you can add more data to this object if you like
   // to help with subdivision (for example)
   newObject = {
     boundingBox: [bb1, bb2],
-    scaleFactor: 1,  // FIX!  the scale should be such that the largest view of the object is 300 units
-    center: [0, 0, 0],  // FIX!  the center of the object
+    scaleFactor: 300/vec3.distance(bb1,bb2),  
+    center: center_bb1_bb2,
     numElements: indices.length,
+    indices: indices,
+    vertices: mesh.v,
+    numTris: numTris,
+    nv: numVerts,
+    nc: 3 * numTris,
     arrays: {
       position: new Float32Array(position),
       normal: new Float32Array(normal),
@@ -142,10 +257,211 @@ window["loadModel"] = () => {
  
 window["onSubdivide"] = () => {
     console.log("Subdivide called!  You should do the subdivision!");
+    var nv = object.nv;
+    var nt = object.numTris;
+    var nc = object.nc;
+    var opposite_table = new Array(object.arrays.indices.length);
+    var indices = new Array(object.arrays.indices.length);
+    var vertices = new Array(object.vertices.length);
+    for(var i = 0; i < object.vertices.length; i++){vertices[i] = object.vertices[i];}
+    for (var i = 0; i < indices.length; i++){indices[i] = object.arrays.indices[i];}
+
+    var midPoint = function(i , j){return [((i[0]+j[0])/2), ((i[1]+j[1])/2), ((i[2]+j[2])/2)];} // midpoint formula
+    function t_triangle_of_corner (c) {return Math.floor(c/3);} // triangle of corner 
+    function n_next_corner (c) {return 3 * t_triangle_of_corner(c) + (c + 1) % 3;} // next corner in the same t(c) 
+    function p_prev_corner (c) {return n_next_corner(n_next_corner(c));}  // previous corner in the same t(c) 
+    function v_vertex_id (c) {return indices[c];}; //id of the vertex c
+    function g_coordinate_vertex (c) {return vertices[v_vertex_id(c)];}; // point of the vertex v(c) of corner c
+    function border (c) {return opposite_table[c]==c;}; // if faces a border (has no opposite)
+    function o_opposite (c) {return opposite_table[c];}; // opposite (or self)
+    function l_left_neighbor (c) {return o_opposite(n_next_corner(c));}; // left neighbor or next if b(n(c))
+    function r_right_neighbor (c) {return o_opposite(p_prev_corner(c));}; // right neighbor or next if b(p(c))
+    //function s_swing (c) {return n_next_corner(l_left_neighbor(c));}; // swings around v(c) or around a border loop
+    function w_index_split(c){ return w_split_new_tris[c]};
+    var w_split_new_tris = new Array();
     
-  //////////////
-  ///////// YOUR CODE HERE TO TAKE THE CURRENT OBJECT and SUBDIVIDE it, creating a newObject
-  //////////////
+    
+    // function from slides
+    // creates the oppposite table
+    var createOtable = function (){
+      for (var c = 0; c < nc-1; c++){
+        for (var b = c+1; b < nc; b++){
+          if(v_vertex_id(n_next_corner(c)) == v_vertex_id(p_prev_corner(b)) && 
+             v_vertex_id(p_prev_corner(c)) == v_vertex_id(n_next_corner(b))) {
+             opposite_table[c] = b;
+             opposite_table[b] = c
+          } 
+        }
+      }
+    }
+    createOtable();
+
+    // function from slides
+    // splits edges in between triangles
+    var edge_split = function(){ 
+      for (var i = 0; i < nc ; i++){
+        if(border(i)){
+          vertices[nv] = midPoint(g_coordinate_vertex(n_next_corner(i)),g_coordinate_vertex(p_prev_corner(i)));
+          w_split_new_tris[i] = nv++;
+        }
+        else{
+          if (i < o_opposite(i)){
+            vertices[nv] = midPoint(g_coordinate_vertex(n_next_corner(i)), g_coordinate_vertex(p_prev_corner(i)));
+            w_split_new_tris[o_opposite(i)] = nv;
+            w_split_new_tris[i] = nv++;
+          }
+        }
+      }
+    }
+    edge_split();
+
+    // function from slides
+    // creates bulge using midpoint
+    var bulge = function(){
+      for(var i = 0; i < nc; i++){
+        if(i < o_opposite(i) && !border(i)){
+          if (!border(p_prev_corner(i)) && !border(n_next_corner(i)) && !border(p_prev_corner(o_opposite(i))) && !border(n_next_corner(o_opposite(i)))){
+            var vertex_a_1 = midPoint(g_coordinate_vertex(i), g_coordinate_vertex(o_opposite(i)));
+            var vertex_a_2 = midPoint(midPoint(g_coordinate_vertex(l_left_neighbor(i)), g_coordinate_vertex(r_right_neighbor(i))),midPoint(g_coordinate_vertex(l_left_neighbor(o_opposite(i))),g_coordinate_vertex(r_right_neighbor(o_opposite(i)))));
+            var vertex_a = vec3.create();
+            vertex_a = vec3.subtract(vertex_a, vertex_a_1, vertex_a_2);
+            var vertex_a_scaled = vec3.create();
+            vec3.scale(vertex_a_scaled, vertex_a, 0.25);
+            vec3.add(vertices[w_split_new_tris[i]], vertices[w_split_new_tris[i]], vertex_a_scaled);
+          }
+        }
+      }
+    }
+    bulge();
+    
+    // function from slides
+    // takes in each triangle and makes it into four triangles
+    var tri_split = function(){
+        for(var i = 0; i < 3*nt; i=i+3){      
+          indices[nt*3+i] = v_vertex_id(i);
+          indices[n_next_corner(nt*3+i)] = w_split_new_tris[p_prev_corner(i)];
+          indices[p_prev_corner(nt*3+i)] = w_split_new_tris[n_next_corner(i)];
+          indices[nt*6+i] = v_vertex_id(n_next_corner(i));
+          indices[n_next_corner(nt*6+i)] = w_split_new_tris[i];
+          indices[p_prev_corner(nt*6+i)] = w_split_new_tris[p_prev_corner(i)];
+          indices[nt*9+i] = v_vertex_id(p_prev_corner(i));
+          indices[n_next_corner(nt*9+i)] = w_split_new_tris[n_next_corner(i)];
+          indices[p_prev_corner(nt*9+i)] = w_split_new_tris[i];
+          indices[i] = w_index_split(i);
+          indices[n_next_corner(i)] = w_index_split(n_next_corner(i));
+          indices[p_prev_corner(i)] = w_index_split(p_prev_corner(i));
+        }
+        nt = nt*4;
+        nc = nt*3;
+    }
+    tri_split();
+
+//////////////////////////////////////////////////////////////
+    // CODE FROM ONLOAD FUNCTION
+    var position = new Array();
+    var color = new Array();
+    var normal = new Array();
+
+  // position is coordinates of vertices in 1D array
+    var populatePosition = function() {
+      for(var i = 0; i < nv; i++){
+        position.push(vertices[i][0], vertices[i][1], vertices[i][2]);
+      }
+    }
+    populatePosition();
+
+    var populateColor = function() {
+      for (var i = 0; i < nv; i++){
+        var tempColor = chroma.hsv(rand(360), 0.5, 1);
+        color.push(tempColor.rgb()[0], tempColor.rgb()[1], tempColor.rgb()[2], 255);
+      }
+    }
+    populateColor();
+    
+    // for each triangle i, get the normal by getting the coordinates and doing ab x bc
+    // i is triangle number
+    var triangleNormal = function(i) {
+      var vect_a = vec3.fromValues(position[indices[i]*3], position[indices[i]*3+1], position[indices[i]*3+2]);
+      console.dir(vect_a);
+      var vect_b = vec3.fromValues(position[indices[i+1]*3], position[indices[i+1]*3+1], position[indices[i+1]*3+2]);
+      console.dir(vect_b);
+      var vect_c = vec3.fromValues(position[indices[i+2]*3], position[indices[i+2]*3+1], position[indices[i+2]*3+2]);
+      console.dir(vect_c);
+      
+      var vect_ab = vec3.create();
+      vec3.subtract(vect_ab, vect_a, vect_b);
+      
+      var vect_bc = vec3.create();
+      vec3.subtract(vect_bc, vect_b, vect_c)
+      
+      var norm_ab_ac = vec3.create();
+      vec3.cross(norm_ab_ac, vect_ab, vect_bc);
+      
+      return norm_ab_ac;
+    }
+    
+  
+    var normal_tri_arr = new Array();
+    // for each triangle, get the norm
+    var computeTriNormals = function() {
+      var count = 0;
+      for(var i = 0; i < indices.length; i=i+3){
+          normal_tri_arr[count] = triangleNormal(i);
+          count++;
+      }
+    }
+    computeTriNormals();
+
+    // function from slides
+    // computes vertex normals for each vertex
+    var computeVertexNormals = function() {
+      for(var i = 0; i < vertices.length; i++){
+        normal[i] = vec3.create();
+      }  
+      
+      for(var i = 0; i < normal_tri_arr.length; i++){
+        vec3.add(normal[indices[i*3]], normal[indices[i*3]], normal_tri_arr[i]);
+        vec3.add(normal[indices[i*3+1]], normal[indices[i*3+1]], normal_tri_arr[i]);
+        vec3.add(normal[indices[i*3+2]], normal[indices[i*3+2]], normal_tri_arr[i]);
+      }
+      
+      for(var i = 0; i < normal.length; i++){
+        vec3.normalize(normal[i],normal[i]);
+      }
+      
+      var temp = [];
+      for(var i = 0; i < normal.length; i++){
+        temp.push(normal[i][0],normal[i][1],normal[i][2]);
+      }
+      normal = [];
+      normal = temp;
+    }
+    computeVertexNormals();
+    
+  
+      // bb1 and bb2 are the corners of the bounding box of the object.  
+     var bb1 = object.boundingBox[0];
+     var bb2 = object.boundingBox[1];
+     
+     
+     // render
+      newObject = {
+        boundingBox: [bb1, bb2],
+        scaleFactor: 300/vec3.distance(bb1,bb2),  
+        center: object.center,
+        numElements: indices.length,
+        indices: indices,
+        vertices: vertices,
+        numTris: nt,
+        nv: nv,
+        nc: nc,
+        arrays: {
+          position: new Float32Array(position),
+          normal: new Float32Array(normal),
+          color: new Uint8Array(color),
+          indices: new Uint16Array(indices)
+      }
+  };
 } 
 
 ////////////////////////////////////////////////////////////////////////////////////////////
